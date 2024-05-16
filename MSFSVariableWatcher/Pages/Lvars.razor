@@ -1,0 +1,132 @@
+﻿@page "/lvars"
+@using FSUIPC;
+
+
+<h3>Lvars</h3>
+
+Count: @MSFSVariableServices.LVars.Count
+<br />
+Last update: @DateTime.Now
+<br />
+<input type="checkbox" @bind="autoRefresh" /> Auto refresh
+<br />
+<input type="checkbox" @bind="hideUnchanged" /> Hide unchanged
+<br />
+<input @bind="search" />
+<br />
+
+<table class="table">
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Value</th>
+        </tr>
+    </thead>
+    <tbody>
+
+        @foreach (var v in getListFiltered())
+        {          
+            <tr>
+                <td>@v.Name</td>
+
+                @if (HasChanged(v.Name))
+                {
+                    <td style="color:#DAF7A6 ;background-color:#101010">@v.Value</td>
+                }
+                else
+                {
+                    <td>@v.Value</td>
+                }
+
+            </tr>
+        }
+    </tbody>
+</table>
+
+@code {
+    bool autoRefresh = true;
+    bool hideUnchanged = true;
+    string search = "";
+
+    private Dictionary<string, DateTime> lastChanged = new();
+
+    private bool HasChanged(string v)
+    {
+        if (!lastChanged.ContainsKey(v))
+        {
+            return false;
+        }
+
+        if (DateTime.Now - lastChanged[v] < TimeSpan.FromSeconds(5))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private List<FsLVar> getListFiltered()
+    {
+        Dictionary<string, bool> response = new();
+
+        foreach (var v in MSFSVariableServices.LVars.Names.ToList())
+        {
+            response[v] = true;
+        }
+
+        if (!string.IsNullOrEmpty(search))
+        {
+            foreach (var n in MSFSVariableServices.LVars.Names.ToList().Where(x => !x.ToLower().Contains(search.ToLower())))
+            {
+                response[n] = false;
+            }
+        }
+
+        if (hideUnchanged)
+        {
+            foreach (var n in MSFSVariableServices.LVars.Names.ToList())
+            {
+                if (!HasChanged(n))
+                {
+                    response[n] = false;
+                }
+            }
+        }
+
+        List<FsLVar> filtered = new();
+        foreach (var r in response.Where(r => r.Value == true))
+        {
+            filtered.Add(MSFSVariableServices.LVars[r.Key]);
+        }
+
+        return filtered;
+    }
+
+    protected override void OnInitialized()
+    {
+        MSFSVariableServices.OnValuesChanged += OnValuesChanged;
+
+        foreach (var v in MSFSVariableServices.LVars.Names)
+        {
+            MSFSVariableServices.LVars[v].OnValueChanged += SingleLvarChanged;
+        }
+    }
+
+    private void SingleLvarChanged(object? sender, LVarEvent e)
+    {
+        lastChanged[e.LVar.Name] = DateTime.Now;
+    }
+
+    private void OnValuesChanged(object? sender, EventArgs e)
+    {
+        if (!autoRefresh)
+        {
+            return;
+        }
+
+        InvokeAsync(() =>
+     {
+         StateHasChanged();
+     });
+    }
+}
