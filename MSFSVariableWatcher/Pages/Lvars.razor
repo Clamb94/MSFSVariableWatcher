@@ -8,11 +8,24 @@ Count: @MSFSVariableServices.LVars.Count
 <br />
 Last update: @DateTime.Now
 <br />
-<input type="checkbox" @bind="autoRefresh" /> Auto refresh
+<span title="Automatically refresh the list of LVars">
+    <input type="checkbox" @bind="autoRefresh" /> Auto refresh
+</span>
 <br />
-<input type="checkbox" @bind="hideUnchanged" /> Hide unchanged
+<span title="Hide LVars that have not changed">
+    <input type="checkbox" @bind="hideUnchanged" /> Hide unchanged
+</span>
 <br />
+<span title="Keep LVars that have changed at least once in the list">
+    <input type="checkbox" @bind="keepChanged" /> Keep changed
+</span>
+<br />
+<span>Search: </span>
 <input @bind="search" />
+<br />
+<button @onclick="BlacklistVisibleLVars" title="Remove all LVARs currently visible from list">Add visible LVARs to blacklist</button>
+<button @onclick="ClearBlacklist">Clear blacklist</button>
+<span>Blacklist count: @blacklist.Count</span>
 <br />
 
 <table class="table">
@@ -46,9 +59,14 @@ Last update: @DateTime.Now
 @code {
     bool autoRefresh = true;
     bool hideUnchanged = true;
+    bool keepChanged = false;
+
     string search = "";
+    private HashSet<string> blacklist = new HashSet<string>();
+    private HashSet<string> keepChangedSet = new HashSet<string>();
 
     private Dictionary<string, DateTime> lastChanged = new();
+
 
     private bool HasChanged(string v)
     {
@@ -82,20 +100,43 @@ Last update: @DateTime.Now
             }
         }
 
+        if (!keepChanged) 
+        {
+            keepChangedSet.Clear();
+        }
+
         if (hideUnchanged)
         {
             foreach (var n in MSFSVariableServices.LVars.Names.ToList())
             {
+                if (keepChangedSet.Contains(n))
+                {
+                    continue;
+                }
+
                 if (!HasChanged(n))
                 {
                     response[n] = false;
+                } else
+                {
+                    if (keepChanged)
+                    {
+                        keepChangedSet.Add(n);
+                    };
                 }
             }
         }
 
+
+
         List<FsLVar> filtered = new();
         foreach (var r in response.Where(r => r.Value == true))
         {
+            if (blacklist.Contains(r.Key))
+            {
+                continue;
+            }
+
             filtered.Add(MSFSVariableServices.LVars[r.Key]);
         }
 
@@ -115,6 +156,20 @@ Last update: @DateTime.Now
     private void SingleLvarChanged(object? sender, LVarEvent e)
     {
         lastChanged[e.LVar.Name] = DateTime.Now;
+    }
+
+    private void BlacklistVisibleLVars()
+    {
+        var visibleLVars = getListFiltered().Select(lvar => lvar.Name);
+        foreach (var lvarName in visibleLVars)
+        {
+            blacklist.Add(lvarName);
+        }
+    }
+
+    private void ClearBlacklist()
+    {
+        blacklist.Clear();
     }
 
     private void OnValuesChanged(object? sender, EventArgs e)
