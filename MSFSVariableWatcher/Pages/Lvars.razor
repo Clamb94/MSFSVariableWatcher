@@ -1,60 +1,80 @@
-﻿@page "/lvars"
+﻿@page "/"
 @using FSUIPC;
 
+<h3>LVARs</h3>
 
-<h3>Lvars</h3>
+@if (MSFSVariableServices.IsRunning)
+{
+    <div>
+        Count: @MSFSVariableServices.LVars.Count
+        <br />
+        Last update: @DateTime.Now
+        <br />
+        <div title="Automatically refresh the list of LVARs">
+            <input type="checkbox" @bind="autoRefresh" /> Auto refresh
+        </div>
+        <div title="Hide LVARs that have not changed">
+            <input type="checkbox" @bind="hideUnchanged" /> Hide unchanged
+        </div>
+        <div title="Keep LVARs that have changed at least once in the list" style="margin-left:10px" >
+            <input type="checkbox" @bind="keepChanged" disabled="@(!hideUnchanged)" />
+            @if (!hideUnchanged)
+            {
+                <span style="opacity:0.5"> Keep changed once</span>
+            } else
+            {
+                <span> Keep changed once</span>
+            }
+        </div>
 
-Count: @MSFSVariableServices.LVars.Count
-<br />
-Last update: @DateTime.Now
-<br />
-<span title="Automatically refresh the list of LVars">
-    <input type="checkbox" @bind="autoRefresh" /> Auto refresh
-</span>
-<br />
-<span title="Hide LVars that have not changed">
-    <input type="checkbox" @bind="hideUnchanged" /> Hide unchanged
-</span>
-<br />
-<span title="Keep LVars that have changed at least once in the list">
-    <input type="checkbox" @bind="keepChanged" /> Keep changed
-</span>
-<br />
-<span>Search: </span>
-<input @bind="search" />
-<br />
-<button @onclick="BlacklistVisibleLVars" title="Remove all LVARs currently visible from list">Add visible LVARs to blacklist</button>
-<button @onclick="ClearBlacklist">Clear blacklist</button>
-<span>Blacklist count: @blacklist.Count</span>
-<br />
+        <div>
+            <span>Search: </span>
+            <input @bind="search" />
+        </div>
+        <div style="margin-top: 10px">
+            <button class="btn btn-primary btn-sm" @onclick="BlacklistVisibleLVars" title="Remove all LVARs currently visible from list">Add visible LVARs to blacklist</button>
+            <button class="btn btn-primary btn-sm" @onclick="ClearBlacklist">Clear blacklist</button>
+            <span>Blacklist count: @blacklist.Count</span>
+        </div>
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Value</th>
+                </tr>
+            </thead>
+            <tbody>
 
-<table class="table">
-    <thead>
-        <tr>
-            <th>Name</th>
-            <th>Value</th>
-        </tr>
-    </thead>
-    <tbody>
-
-        @foreach (var v in getListFiltered())
-        {          
-            <tr>
-                <td>@v.Name</td>
-
-                @if (HasChanged(v.Name))
+                @foreach (var v in getListFiltered())
                 {
-                    <td style="color:#DAF7A6 ;background-color:#101010">@v.Value</td>
-                }
-                else
-                {
-                    <td>@v.Value</td>
-                }
+                    <tr>
+                        <td>@v.Name</td>
 
-            </tr>
-        }
-    </tbody>
-</table>
+                        @if (HasChanged(v.Name))
+                        {
+                            <td style="color:#DAF7A6 ;background-color:#101010">@v.Value</td>
+                        }
+                        else
+                        {
+                            <td>@v.Value</td>
+                        }
+
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+} else
+{
+    <div style="color:red; background:black">
+        NOT CONNECTED TO MSFS! <br />
+        RESTART THE APPLICATION (.EXE) AFTER LAUNCHING MSFS.
+    </div>
+}
+
+
+
+
 
 @code {
     bool autoRefresh = true;
