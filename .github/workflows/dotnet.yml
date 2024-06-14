@@ -1,0 +1,29 @@
+name: publish
+
+on:  
+  workflow_dispatch:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v3       
+    - name: Install .NET Core
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 8.0.x
+    - name: Restore dependencies
+      run: dotnet restore            
+    - name: Build
+      run: dotnet publish -r win-x64 -o publish -p:PublishSingleFile=true --self-contained true   
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: MSFSVariableWatcher
+        path: |
+          ${{ github.workspace }}/publish/
