@@ -86,6 +86,7 @@
     private HashSet<string> keepChangedSet = new HashSet<string>();
 
     private Dictionary<string, DateTime> lastChanged = new();
+    private HashSet<string> subscribedLVars = new();
 
 
     private bool HasChanged(string v)
@@ -166,10 +167,17 @@
     protected override void OnInitialized()
     {
         MSFSVariableServices.OnValuesChanged += OnValuesChanged;
+        SubscribeNewLVars();
+    }
 
+    private void SubscribeNewLVars()
+    {
         foreach (var v in MSFSVariableServices.LVars.Names)
         {
-            MSFSVariableServices.LVars[v].OnValueChanged += SingleLvarChanged;
+            if (subscribedLVars.Add(v))
+            {
+                MSFSVariableServices.LVars[v].OnValueChanged += SingleLvarChanged;
+            }
         }
     }
 
@@ -194,6 +202,8 @@
 
     private void OnValuesChanged(object? sender, EventArgs e)
     {
+        SubscribeNewLVars();
+
         if (!autoRefresh)
         {
             return;
