@@ -1,5 +1,6 @@
 ﻿@page "/"
 @using FSUIPC;
+@using System.Globalization;
 
 <h3>LVARs</h3>
 
@@ -41,6 +42,7 @@
                 <tr>
                     <th>Name</th>
                     <th>Value</th>
+                    <th>Set</th>
                 </tr>
             </thead>
             <tbody>
@@ -59,6 +61,15 @@
                             <td>@v.Value</td>
                         }
 
+                        <td>
+                            <input type="text"
+                                   style="width:120px"
+                                   value="@GetEditValue(v.Name)"
+                                   @oninput="e => SetEditValue(v.Name, e.Value as string)" />
+                            <button class="btn btn-primary btn-sm"
+                                    @onclick="() => WriteLVar(v.Name)"
+                                    disabled="@(!CanWrite(v.Name))">Set</button>
+                        </td>
                     </tr>
                 }
             </tbody>
@@ -87,6 +98,29 @@
 
     private Dictionary<string, DateTime> lastChanged = new();
     private HashSet<string> subscribedLVars = new();
+    private Dictionary<string, string> editValues = new();
+
+    private string GetEditValue(string name)
+        => editValues.TryGetValue(name, out var s) ? s : "";
+
+    private void SetEditValue(string name, string? value)
+        => editValues[name] = value ?? "";
+
+    private bool CanWrite(string name)
+        => double.TryParse(GetEditValue(name),
+                           NumberStyles.Float,
+                           CultureInfo.InvariantCulture,
+                           out _);
+
+    private void WriteLVar(string name)
+    {
+        if (!double.TryParse(GetEditValue(name),
+                             NumberStyles.Float,
+                             CultureInfo.InvariantCulture,
+                             out var v))
+            return;
+        MSFSVariableServices.LVars[name].SetValue(v);
+    }
 
 
     private bool HasChanged(string v)
