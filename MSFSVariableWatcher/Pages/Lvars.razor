@@ -1,6 +1,8 @@
 ﻿@page "/"
 @using FSUIPC;
+@using System.Collections.Concurrent;
 @using System.Globalization;
+@implements IDisposable
 
 <h3>LVARs</h3>
 
@@ -18,7 +20,7 @@
             <input type="checkbox" @bind="hideUnchanged" /> Hide unchanged
         </div>
         <div title="Keep LVARs that have changed at least once in the list" style="margin-left:10px" >
-            <input type="checkbox" @bind="keepChanged" disabled="@(!hideUnchanged)" />
+            <input type="checkbox" @bind="keepChanged" @bind:after="OnKeepChangedToggled" disabled="@(!hideUnchanged)" />
             @if (!hideUnchanged)
             {
                 <span style="opacity:0.5"> Keep changed once</span>
@@ -94,10 +96,10 @@
 
     string search = "";
     private HashSet<string> blacklist = new HashSet<string>();
-    private HashSet<string> keepChangedSet = new HashSet<string>();
+    private ConcurrentDictionary<string, byte> keepChangedSet = new();
 
-    private Dictionary<string, DateTime> lastChanged = new();
-    private HashSet<string> subscribedLVars = new();
+    private ConcurrentDictionary<string, DateTime> lastChanged = new();
+    private ConcurrentDictionary<string, byte> subscribedLVars = new();
     private Dictionary<string, string> editValues = new();
 
     private string GetEditValue(string name)
@@ -125,77 +127,48 @@
 
     private bool HasChanged(string v)
     {
-        if (!lastChanged.ContainsKey(v))
+        if (!lastChanged.TryGetValue(v, out var when))
         {
             return false;
         }
 
-        if (DateTime.Now - lastChanged[v] < TimeSpan.FromSeconds(5))
-        {
-            return true;
-        }
-
-        return false;
+        return DateTime.Now - when < TimeSpan.FromSeconds(5);
     }
 
     private List<FsLVar> getListFiltered()
     {
-        Dictionary<string, bool> response = new();
-
-        foreach (var v in MSFSVariableServices.LVars.Names.ToList())
-        {
-            response[v] = true;
-        }
-
-        if (!string.IsNullOrEmpty(search))
-        {
-            foreach (var n in MSFSVariableServices.LVars.Names.ToList().Where(x => !x.ToLower().Contains(search.ToLower())))
-            {
-                response[n] = false;
-            }
-        }
-
-        if (!keepChanged) 
-        {
-            keepChangedSet.Clear();
-        }
-
-        if (hideUnchanged)
-        {
-            foreach (var n in MSFSVariableServices.LVars.Names.ToList())
-            {
-                if (keepChangedSet.Contains(n))
-                {
-                    continue;
-                }
-
-                if (!HasChanged(n))
-                {
-                    response[n] = false;
-                } else
-                {
-                    if (keepChanged)
-                    {
-                        keepChangedSet.Add(n);
-                    };
-                }
-            }
-        }
-
-
-
         List<FsLVar> filtered = new();
-        foreach (var r in response.Where(r => r.Value == true))
+
+        foreach (var name in MSFSVariableServices.LVars.Names.ToList())
         {
-            if (blacklist.Contains(r.Key))
+            if (blacklist.Contains(name))
             {
                 continue;
             }
 
-            filtered.Add(MSFSVariableServices.LVars[r.Key]);
+            if (!string.IsNullOrEmpty(search) &&
+                !name.Contains(search, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (hideUnchanged && !HasChanged(name) && !keepChangedSet.ContainsKey(name))
+            {
+                continue;
+            }
+
+            filtered.Add(MSFSVariableServices.LVars[name]);
         }
 
         return filtered;
+    }
+
+    private void OnKeepChangedToggled()
+    {
+        if (!keepChanged)
+        {
+            keepChangedSet.Clear();
+        }
     }
 
     protected override void OnInitialized()
@@ -206,9 +179,9 @@
 
     private void SubscribeNewLVars()
     {
-        foreach (var v in MSFSVariableServices.LVars.Names)
+        foreach (var v in MSFSVariableServices.LVars.Names.ToList())
         {
-            if (subscribedLVars.Add(v))
+            if (subscribedLVars.TryAdd(v, 0))
             {
                 MSFSVariableServices.LVars[v].OnValueChanged += SingleLvarChanged;
             }
@@ -218,6 +191,11 @@
     private void SingleLvarChanged(object? sender, LVarEvent e)
     {
         lastChanged[e.LVar.Name] = DateTime.Now;
+
+        if (keepChanged && hideUnchanged)
+        {
+            keepChangedSet.TryAdd(e.LVar.Name, 0);
+        }
     }
 
     private void BlacklistVisibleLVars()
@@ -247,5 +225,24 @@
      {
          StateHasChanged();
      });
+    }
+
+    public void Dispose()
+    {
+        MSFSVariableServices.OnValuesChanged -= OnValuesChanged;
+
+        foreach (var name in subscribedLVars.Keys.ToList())
+        {
+            if (MSFSVariableServices.LVars.Names.Contains(name))
+            {
+                MSFSVariableServices.LVars[name].OnValueChanged -= SingleLvarChanged;
+            }
+        }
+
+        subscribedLVars.Clear();
+        lastChanged.Clear();
+        keepChangedSet.Clear();
+        editValues.Clear();
+        blacklist.Clear();
     }
 }
