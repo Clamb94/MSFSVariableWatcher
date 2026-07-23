@@ -26,6 +26,57 @@ a, .btn-link {
     padding-top: 1.1rem;
 }
 
+/* LVAR table: fixed-width columns so changing value length never reflows the layout.
+   Table sizes to its columns (not full screen); Name fits its content, Value + Set are fixed. */
+.lvar-table {
+    width: auto;
+}
+
+/* Name: fits content, does not stretch to fill the row. */
+.lvar-table th.col-name,
+.lvar-table td.col-name {
+    width: 1px;
+    white-space: nowrap;
+    padding-right: 2rem;
+}
+
+/* Value: fixed width, right-aligned, monospaced digits. Adjust the width here. */
+.lvar-table th.col-value,
+.lvar-table td.lvar-value {
+    width: 140px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Set: fixed width (holds the 200px input group). */
+.lvar-table th.col-set,
+.lvar-table td.col-set {
+    width: 220px;
+}
+
+/* Higher specificity so it beats Bootstrap's `.table > :not(caption) > * > *`
+   cell-background rule (otherwise only the text color applies -> unreadable). */
+.table td.lvar-changed {
+    background-color: #d1e7dd;
+    color: #0f5132;
+    font-weight: 600;
+}
+
+.controls-panel {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem 1.5rem;
+    align-items: flex-end;
+    margin-bottom: 1rem;
+}
+
+.controls-panel .form-check {
+    margin-bottom: 0;
+}
+
 .valid.modified:not([type=checkbox]) {
     outline: 1px solid #26b050;
 }

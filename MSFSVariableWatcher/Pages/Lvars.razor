@@ -4,84 +4,84 @@
 @using System.Globalization;
 @implements IDisposable
 
+<PageTitle>LVARs - MSFSVariableWatcher</PageTitle>
+
 <h3>LVARs</h3>
 
 @if (MSFSVariableServices.IsRunning)
 {
-    <div>
-        Count: @MSFSVariableServices.LVars.Count
-        <br />
-        Last update: @DateTime.Now
-        <br />
-        <div title="Automatically refresh the list of LVARs">
-            <input type="checkbox" @bind="autoRefresh" /> Auto refresh
-        </div>
-        <div title="Hide LVARs that have not changed">
-            <input type="checkbox" @bind="hideUnchanged" /> Hide unchanged
-        </div>
-        <div title="Keep LVARs that have changed at least once in the list" style="margin-left:10px" >
-            <input type="checkbox" @bind="keepChanged" @bind:after="OnKeepChangedToggled" disabled="@(!hideUnchanged)" />
-            @if (!hideUnchanged)
-            {
-                <span style="opacity:0.5"> Keep changed once</span>
-            } else
-            {
-                <span> Keep changed once</span>
-            }
-        </div>
+    <div class="alert alert-info py-2">
+        <strong>@MSFSVariableServices.LVars.Count</strong> LVARs &middot; last update @DateTime.Now.ToString("HH:mm:ss")
+    </div>
 
-        <div>
-            <span>Search: </span>
-            <input @bind="search" />
+    <div class="card mb-3">
+        <div class="card-body">
+            <div class="controls-panel">
+                <div class="form-check" title="Automatically refresh the list of LVARs">
+                    <input class="form-check-input" type="checkbox" id="cbAutoRefresh" @bind="autoRefresh" />
+                    <label class="form-check-label" for="cbAutoRefresh">Auto refresh</label>
+                </div>
+                <div class="form-check" title="Hide LVARs that have not changed">
+                    <input class="form-check-input" type="checkbox" id="cbHideUnchanged" @bind="hideUnchanged" />
+                    <label class="form-check-label" for="cbHideUnchanged">Hide unchanged</label>
+                </div>
+                <div class="form-check" title="Keep LVARs that have changed at least once in the list">
+                    <input class="form-check-input" type="checkbox" id="cbKeepChanged" @bind="keepChanged" @bind:after="OnKeepChangedToggled" disabled="@(!hideUnchanged)" />
+                    <label class="form-check-label" for="cbKeepChanged" style="@(hideUnchanged ? "" : "opacity:0.5")">Keep changed once</label>
+                </div>
+                <div class="form-check" title="Freeze the set of rows shown; values keep updating">
+                    <input class="form-check-input" type="checkbox" id="cbLock" @bind="locked" @bind:after="OnLockToggled" />
+                    <label class="form-check-label" for="cbLock">Lock list</label>
+                </div>
+                <div>
+                    <label class="form-label mb-0" for="txtSearch">Search</label>
+                    <input class="form-control form-control-sm" id="txtSearch" @bind="search" @bind:event="oninput" />
+                </div>
+            </div>
+
+            <div class="d-flex align-items-center gap-2 mt-3 flex-wrap">
+                <button class="btn btn-outline-secondary btn-sm" @onclick="BlacklistVisibleLVars" title="Remove all LVARs currently visible from list">Blacklist visible</button>
+                <button class="btn btn-outline-secondary btn-sm" @onclick="ClearBlacklist">Clear blacklist</button>
+                <span class="text-muted small">Blacklisted: @blacklist.Count</span>
+            </div>
         </div>
-        <div style="margin-top: 10px">
-            <button class="btn btn-primary btn-sm" @onclick="BlacklistVisibleLVars" title="Remove all LVARs currently visible from list">Add visible LVARs to blacklist</button>
-            <button class="btn btn-primary btn-sm" @onclick="ClearBlacklist">Clear blacklist</button>
-            <span>Blacklist count: @blacklist.Count</span>
-        </div>
-        <table class="table">
-            <thead>
+    </div>
+
+    <table class="table table-sm table-hover lvar-table">
+        <thead>
+            <tr>
+                <th class="col-name">Name</th>
+                <th class="col-value">Value</th>
+                <th class="col-set">Set</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var v in getListFiltered())
+            {
                 <tr>
-                    <th>Name</th>
-                    <th>Value</th>
-                    <th>Set</th>
-                </tr>
-            </thead>
-            <tbody>
-
-                @foreach (var v in getListFiltered())
-                {
-                    <tr>
-                        <td>@v.Name</td>
-
-                        @if (HasChanged(v.Name))
-                        {
-                            <td style="color:#DAF7A6 ;background-color:#101010">@v.Value</td>
-                        }
-                        else
-                        {
-                            <td>@v.Value</td>
-                        }
-
-                        <td>
+                    <td class="col-name">@v.Name</td>
+                    <td class="lvar-value @(HasChanged(v.Name) ? "lvar-changed" : "")">@v.Value</td>
+                    <td class="col-set">
+                        <div class="input-group input-group-sm" style="width:200px">
                             <input type="text"
-                                   style="width:120px"
+                                   class="form-control"
                                    value="@GetEditValue(v.Name)"
                                    @oninput="e => SetEditValue(v.Name, e.Value as string)" />
-                            <button class="btn btn-primary btn-sm"
+                            <button class="btn btn-primary"
                                     @onclick="() => WriteLVar(v.Name)"
                                     disabled="@(!CanWrite(v.Name))">Set</button>
-                        </td>
-                    </tr>
-                }
-            </tbody>
-        </table>
-    </div>
-} else
+                        </div>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+else
 {
-    <div style="color:red; background:black">
-        NOT CONNECTED TO MSFS! <br />
-        RESTART THE APPLICATION (.EXE) AFTER LAUNCHING MSFS.
+    <div class="alert alert-danger">
+        <strong>Not connected to MSFS.</strong><br />
+        Waiting for connection &mdash; this reconnects automatically once MSFS (with FSUIPC / WASM) is running.
     </div>
 }
 
@@ -93,9 +93,11 @@
     bool autoRefresh = true;
     bool hideUnchanged = true;
     bool keepChanged = false;
+    bool locked = false;
+    private List<string> lockedNames = new();
 
     string search = "";
-    private HashSet<string> blacklist = new HashSet<string>();
+    private HashSet<string> blacklist = BlacklistStore.Load();
     private ConcurrentDictionary<string, byte> keepChangedSet = new();
 
     private ConcurrentDictionary<string, DateTime> lastChanged = new();
@@ -121,6 +123,9 @@
                              CultureInfo.InvariantCulture,
                              out var v))
             return;
+        // The LVAR may have vanished (e.g. mid-reconnect) between render and click.
+        if (!MSFSVariableServices.LVars.Names.Contains(name))
+            return;
         MSFSVariableServices.LVars[name].SetValue(v);
     }
 
@@ -136,6 +141,19 @@
     }
 
     private List<FsLVar> getListFiltered()
+    {
+        if (locked)
+        {
+            return lockedNames
+                .Where(n => MSFSVariableServices.LVars.Names.Contains(n))
+                .Select(n => MSFSVariableServices.LVars[n])
+                .ToList();
+        }
+
+        return getListFilteredCore();
+    }
+
+    private List<FsLVar> getListFilteredCore()
     {
         List<FsLVar> filtered = new();
 
@@ -171,10 +189,30 @@
         }
     }
 
+    private void OnLockToggled()
+    {
+        if (locked)
+        {
+            lockedNames = getListFilteredCore().Select(l => l.Name).ToList();
+        }
+        else
+        {
+            lockedNames.Clear();
+        }
+    }
+
+    private Timer? uiHeartbeat;
+
     protected override void OnInitialized()
     {
         MSFSVariableServices.OnValuesChanged += OnValuesChanged;
         SubscribeNewLVars();
+
+        // OnValuesChanged only fires while connected, so it can't drive a re-render when the
+        // connection drops (or is re-established). This heartbeat re-renders every 2s so the
+        // connection banner and "last update" clock stay live regardless of connection state.
+        uiHeartbeat = new Timer(_ => InvokeAsync(StateHasChanged), null,
+                                TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
     }
 
     private void SubscribeNewLVars()
@@ -205,11 +243,13 @@
         {
             blacklist.Add(lvarName);
         }
+        BlacklistStore.Save(blacklist);
     }
 
     private void ClearBlacklist()
     {
         blacklist.Clear();
+        BlacklistStore.Save(blacklist);
     }
 
     private void OnValuesChanged(object? sender, EventArgs e)
@@ -229,6 +269,8 @@
 
     public void Dispose()
     {
+        uiHeartbeat?.Dispose();
+
         MSFSVariableServices.OnValuesChanged -= OnValuesChanged;
 
         foreach (var name in subscribedLVars.Keys.ToList())
@@ -244,5 +286,6 @@
         keepChangedSet.Clear();
         editValues.Clear();
         blacklist.Clear();
+        lockedNames.Clear();
     }
 }

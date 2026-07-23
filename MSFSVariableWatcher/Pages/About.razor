@@ -1,11 +1,34 @@
-﻿@page "/About"
+@page "/About"
+@using System.Reflection
+
+<PageTitle>About - MSFSVariableWatcher</PageTitle>
+
 <h3>About</h3>
 
 <div>
-    <p>Uses the FSUIPC Client DLL for .NET by Paul Henty</p>
-    <p>The software and documentation are provided ‘AS IS’ without warranty of any kind. </p>
+    <p><strong>MSFSVariableWatcher</strong> version @Version</p>
+    <p>A small local web UI for inspecting and writing LVARs (local aircraft variables) from a running Microsoft Flight Simulator instance.</p>
+
+    <ul>
+        <li>Source &amp; releases: <a href="https://github.com/Clamb94/MSFSVariableWatcher" target="_blank">github.com/Clamb94/MSFSVariableWatcher</a></li>
+        <li>License: Apache-2.0</li>
+    </ul>
+
+    <p>Uses the FSUIPC Client DLL for .NET by Paul Henty.</p>
+    <p>The software and documentation are provided 'AS IS' without warranty of any kind.</p>
 </div>
 
 @code {
-
+    private static string Version
+    {
+        get
+        {
+            var info = Assembly.GetExecutingAssembly()
+                .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+            // Strip any build metadata suffix (e.g. "1.0.0+abc123").
+            if (!string.IsNullOrEmpty(info))
+                return info.Split('+')[0];
+            return Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "unknown";
+        }
+    }
 }

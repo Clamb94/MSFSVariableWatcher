@@ -6,6 +6,14 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <StartupObject>MSFSVariableWatcher.Program</StartupObject>
     <Version>0.1.0</Version>
+    <Product>MSFS Variable Watcher</Product>
+    <Authors>Clamb94</Authors>
+    <Company>Clamb94</Company>
+    <Description>Local web UI to inspect and write MSFS LVARs via FSUIPC.</Description>
+    <RepositoryUrl>https://github.com/Clamb94/MSFSVariableWatcher</RepositoryUrl>
+    <!-- Native FSUIPC_WAPID.dll is P/Invoked by name, so it must sit next to the exe
+         (not embedded in the single file). The <None> item below copies it to output/publish.
+         Standalone (self-contained, no .NET runtime on target) is set via publish flags in CI. -->
   </PropertyGroup>
 
   <ItemGroup>

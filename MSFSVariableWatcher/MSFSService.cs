@@ -19,5 +19,18 @@ namespace MSFSVariableWatcher
         }
 
         public static void Start() => MSFSVariableServices.Start();
+
+        public static void Stop() => MSFSVariableServices.Stop();
+
+        /// <summary>
+        /// Author-sanctioned recovery: Stop() resets the native data-definition state, then
+        /// Start() re-attempts the connection. Existing FsLVar.OnValueChanged subscriptions
+        /// survive the cycle. Safe to call even when not currently connected.
+        /// </summary>
+        public static void Reconnect()
+        {
+            MSFSVariableServices.Stop();
+            MSFSVariableServices.Start();
+        }
     }
 }
