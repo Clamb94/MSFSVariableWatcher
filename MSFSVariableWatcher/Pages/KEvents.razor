@@ -1,0 +1,249 @@
+@page "/kevents"
+@using FSUIPC;
+@using System.Globalization;
+@implements IDisposable
+
+<PageTitle>K: Events - MSFSVariableWatcher</PageTitle>
+
+<h3>K: Events</h3>
+
+<div class="alert alert-info py-2">
+    <strong>@KEventCatalog.Events.Count</strong> key events from the MSFS 2020 + 2024 SDK docs.
+    The sim cannot enumerate K: events, so this list is static &mdash; an event being listed does not
+    mean the current aircraft implements it.
+</div>
+
+@if (!MSFSVariableServices.IsRunning)
+{
+    <div class="alert alert-danger">
+        <strong>Not connected to MSFS.</strong><br />
+        Events can be browsed but not sent. This reconnects automatically once MSFS (with FSUIPC / WASM) is running.
+    </div>
+}
+
+<div class="card mb-3">
+    <div class="card-body">
+        <div class="controls-panel">
+            <div>
+                <label class="form-label mb-0" for="txtSearch">Search</label>
+                <input class="form-control form-control-sm" id="txtSearch" @bind="search" @bind:event="oninput" placeholder="name or description" />
+            </div>
+            <div>
+                <label class="form-label mb-0" for="selGroup">Group</label>
+                <select class="form-select form-select-sm" id="selGroup" @bind="group">
+                    <option value="">All groups</option>
+                    @foreach (var g in KEventCatalog.Groups)
+                    {
+                        <option value="@g">@g</option>
+                    }
+                </select>
+            </div>
+            <div>
+                <label class="form-label mb-0" for="selSim">Sim</label>
+                <select class="form-select form-select-sm" id="selSim" @bind="sim">
+                    <option value="">2020 + 2024</option>
+                    <option value="2024">In 2024 docs</option>
+                    <option value="2020">In 2020 docs</option>
+                </select>
+            </div>
+        </div>
+
+        @if (!string.IsNullOrEmpty(lastSent))
+        {
+            <div class="mt-3 small text-muted">Last sent: <code>@lastSent</code></div>
+        }
+    </div>
+</div>
+
+@{
+    var matches = Filtered();
+    var shown = matches.Take(MaxRows).ToList();
+}
+
+<div class="mb-2 text-muted small">
+    Showing @shown.Count of @matches.Count matching events.
+    @if (matches.Count > shown.Count)
+    {
+        <span>Narrow the search to see the rest.</span>
+    }
+</div>
+
+<table class="table table-sm table-hover lvar-table">
+    <thead>
+        <tr>
+            <th class="col-name">Name</th>
+            <th>Parameters</th>
+            <th>Description</th>
+            <th class="col-set">Send</th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var e in shown)
+        {
+            <tr>
+                <td class="col-name">
+                    @e.Name
+                    @if (!e.Sims.Contains("2024"))
+                    {
+                        <span class="badge bg-secondary ms-1" title="Only documented for MSFS 2020">2020</span>
+                    }
+                    <div class="text-muted small">@e.Category</div>
+                </td>
+                <td class="small">@e.Parameters</td>
+                <td class="small">@e.Description</td>
+                <td class="col-set">
+                    <div class="input-group input-group-sm" style="width:260px">
+                        @for (var i = 0; i < InputCount(e); i++)
+                        {
+                            var index = i;
+                            var name = e.Name;
+                            <input type="text"
+                                   class="form-control"
+                                   style="max-width:70px"
+                                   placeholder="@($"[{index}]")"
+                                   value="@GetParam(name, index)"
+                                   @oninput="ev => SetParam(name, index, ev.Value as string)" />
+                        }
+                        <button class="btn btn-primary"
+                                @onclick="() => Send(e)"
+                                disabled="@(!CanSend(e))">Send</button>
+                    </div>
+                </td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+@code {
+    // Rendering all ~2000 rows at once makes the Blazor Server circuit crawl.
+    private const int MaxRows = 200;
+
+    private string search = "";
+    private string group = "";
+    private string sim = "";
+    private string? lastSent;
+
+    private readonly Dictionary<string, string[]> paramValues = new();
+
+    private Timer? uiHeartbeat;
+
+    protected override void OnInitialized()
+    {
+        // Keeps the "not connected" banner in sync with the connection state.
+        uiHeartbeat = new Timer(_ => InvokeAsync(StateHasChanged), null,
+                                TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
+    }
+
+    // Events with no documented parameters still take one on many aircraft, so always
+    // offer at least one input.
+    private static int InputCount(KEvent e) => Math.Max(1, e.ParameterCount);
+
+    private string[] ParamsFor(string name)
+    {
+        if (!paramValues.TryGetValue(name, out var values))
+        {
+            values = new string[5];
+            Array.Fill(values, "");
+            paramValues[name] = values;
+        }
+        return values;
+    }
+
+    private string GetParam(string name, int index) => ParamsFor(name)[index];
+
+    private void SetParam(string name, int index, string? value) => ParamsFor(name)[index] = value ?? "";
+
+    private static bool TryParse(string text, out double value)
+        => double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out value);
+
+    // Blank inputs are omitted; anything typed must parse as a number.
+    private bool CanSend(KEvent e)
+    {
+        if (!MSFSVariableServices.IsRunning)
+        {
+            return false;
+        }
+
+        var values = ParamsFor(e.Name);
+        for (var i = 0; i < InputCount(e); i++)
+        {
+            if (!string.IsNullOrWhiteSpace(values[i]) && !TryParse(values[i], out _))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private void Send(KEvent e)
+    {
+        if (!CanSend(e))
+        {
+            return;
+        }
+
+        var values = ParamsFor(e.Name);
+        var args = new List<double>();
+        for (var i = 0; i < InputCount(e); i++)
+        {
+            if (string.IsNullOrWhiteSpace(values[i]))
+            {
+                // A trailing blank just means "no parameter"; a blank before a filled one
+                // would shift the remaining parameters, so pad it with 0.
+                var laterFilled = false;
+                for (var j = i + 1; j < InputCount(e); j++)
+                {
+                    laterFilled |= !string.IsNullOrWhiteSpace(values[j]);
+                }
+                if (!laterFilled)
+                {
+                    break;
+                }
+                args.Add(0);
+                continue;
+            }
+
+            TryParse(values[i], out var v);
+            args.Add(v);
+        }
+
+        try
+        {
+            lastSent = MSFSService.SendKeyEvent(e.Name, args);
+        }
+        catch (Exception ex)
+        {
+            lastSent = $"{e.Name} failed: {ex.Message}";
+        }
+    }
+
+    private List<KEvent> Filtered()
+    {
+        IEnumerable<KEvent> query = KEventCatalog.Events;
+
+        if (!string.IsNullOrEmpty(group))
+        {
+            query = query.Where(e => e.Group == group);
+        }
+
+        if (!string.IsNullOrEmpty(sim))
+        {
+            query = query.Where(e => e.Sims.Contains(sim));
+        }
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            query = query.Where(e =>
+                e.Name.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+                e.Description.Contains(search, StringComparison.OrdinalIgnoreCase));
+        }
+
+        return query.ToList();
+    }
+
+    public void Dispose()
+    {
+        uiHeartbeat?.Dispose();
+        paramValues.Clear();
+    }
+}

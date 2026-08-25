@@ -11,19 +11,9 @@ namespace MSFSVariableWatcher
 
         public static void Main(string[] args)
         {
-            // Register the native FSUIPC callbacks once. If the FSUIPC install / native DLL
-            // is missing this can throw; log and continue so the web UI still comes up and
-            // shows the "NOT CONNECTED" state instead of dying with a raw stack trace.
-            try
-            {
-                MSFSService.InitMSFSServices();
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Failed to initialise FSUIPC services: {ex.Message}");
-                Console.WriteLine("Is FSUIPC installed and is FSUIPC_WAPID.dll next to the exe?");
-            }
-
+            // No FSUIPC calls here on purpose: Init()/Start() are blocking native calls that
+            // hang while MSFS is down, which would stop the web server from ever starting.
+            // ConnectionMonitor owns them and runs them off the host startup path.
             var builder = WebApplication.CreateBuilder(args);
 
             // Add services to the container.

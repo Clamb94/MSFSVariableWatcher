@@ -53,6 +53,7 @@
                 <th class="col-name">Name</th>
                 <th class="col-value">Value</th>
                 <th class="col-set">Set</th>
+                <th></th>
             </tr>
         </thead>
         <tbody>
@@ -72,6 +73,11 @@
                                     disabled="@(!CanWrite(v.Name))">Set</button>
                         </div>
                     </td>
+                    <td>
+                        <button class="btn btn-outline-secondary btn-sm"
+                                @onclick="() => BlacklistLVar(v.Name)"
+                                title="Remove this LVAR from the list">Blacklist</button>
+                    </td>
                 </tr>
             }
         </tbody>
@@ -90,10 +96,12 @@ else
 
 
 @code {
-    bool autoRefresh = true;
-    bool hideUnchanged = true;
-    bool keepChanged = false;
-    bool locked = false;
+    // volatile: written on the Blazor thread, read from FSUIPC callback / heartbeat threads.
+    volatile bool autoRefresh = true;
+    volatile bool hideUnchanged = true;
+    volatile bool keepChanged = false;
+    volatile bool locked = false;
+    private volatile bool disposed;
     private List<string> lockedNames = new();
 
     string search = "";
@@ -124,11 +132,25 @@ else
                              out var v))
             return;
         // The LVAR may have vanished (e.g. mid-reconnect) between render and click.
-        if (!MSFSVariableServices.LVars.Names.Contains(name))
-            return;
-        MSFSVariableServices.LVars[name].SetValue(v);
+        TryGetLVar(name)?.SetValue(v);
     }
 
+
+    // The LVAR set is rebuilt on reconnect, so a name snapshotted a moment ago may already be
+    // gone by the time the indexer runs. Never index LVars without going through this.
+    private static FsLVar? TryGetLVar(string name)
+    {
+        try
+        {
+            return MSFSVariableServices.LVars.Names.Contains(name)
+                ? MSFSVariableServices.LVars[name]
+                : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
 
     private bool HasChanged(string v)
     {
@@ -137,7 +159,9 @@ else
             return false;
         }
 
-        return DateTime.Now - when < TimeSpan.FromSeconds(5);
+        // UtcNow, not Now: on a DST fall-back the local clock jumps backwards and every
+        // touched row would read as "changed" for an hour.
+        return DateTime.UtcNow - when < TimeSpan.FromSeconds(5);
     }
 
     private List<FsLVar> getListFiltered()
@@ -145,8 +169,9 @@ else
         if (locked)
         {
             return lockedNames
-                .Where(n => MSFSVariableServices.LVars.Names.Contains(n))
-                .Select(n => MSFSVariableServices.LVars[n])
+                .Select(TryGetLVar)
+                .Where(l => l is not null)
+                .Select(l => l!)
                 .ToList();
         }
 
@@ -175,7 +200,11 @@ else
                 continue;
             }
 
-            filtered.Add(MSFSVariableServices.LVars[name]);
+            var lvar = TryGetLVar(name);
+            if (lvar is not null)
+            {
+                filtered.Add(lvar);
+            }
         }
 
         return filtered;
@@ -183,7 +212,19 @@ else
 
     private void OnKeepChangedToggled()
     {
-        if (!keepChanged)
+        if (keepChanged)
+        {
+            // Seed with what is on screen right now: those rows are visible only through the
+            // 5s HasChanged() window, so without this they fall out again a few seconds later.
+            foreach (var name in lastChanged.Keys.ToList())
+            {
+                if (HasChanged(name))
+                {
+                    keepChangedSet.TryAdd(name, 0);
+                }
+            }
+        }
+        else
         {
             keepChangedSet.Clear();
         }
@@ -211,26 +252,65 @@ else
         // OnValuesChanged only fires while connected, so it can't drive a re-render when the
         // connection drops (or is re-established). This heartbeat re-renders every 2s so the
         // connection banner and "last update" clock stay live regardless of connection state.
-        uiHeartbeat = new Timer(_ => InvokeAsync(StateHasChanged), null,
-                                TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
+        uiHeartbeat = new Timer(_ =>
+        {
+            // Timer.Dispose() does not wait for an in-flight callback, so re-check: without this
+            // the callback re-subscribes handlers Dispose() just detached (leaking the dead
+            // component for the process lifetime) and renders on a torn-down circuit.
+            if (disposed)
+            {
+                return;
+            }
+
+            // Also re-subscribe here: OnValuesChanged runs after a batch, so an LVAR discovered
+            // in that batch has no handler yet and its first change would go unrecorded.
+            SubscribeNewLVars();
+            InvokeAsync(StateHasChanged);
+        }, null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
     }
 
     private void SubscribeNewLVars()
     {
+        // Called from the heartbeat thread too, where the connection may be down or the
+        // component may already have been disposed.
+        if (disposed || !MSFSVariableServices.IsRunning)
+        {
+            return;
+        }
+
         foreach (var v in MSFSVariableServices.LVars.Names.ToList())
         {
+            if (disposed)
+            {
+                return;
+            }
+
             if (subscribedLVars.TryAdd(v, 0))
             {
-                MSFSVariableServices.LVars[v].OnValueChanged += SingleLvarChanged;
+                var lvar = TryGetLVar(v);
+                if (lvar is null)
+                {
+                    subscribedLVars.TryRemove(v, out _);
+                    continue;
+                }
+
+                lvar.OnValueChanged += SingleLvarChanged;
             }
         }
     }
 
     private void SingleLvarChanged(object? sender, LVarEvent e)
     {
-        lastChanged[e.LVar.Name] = DateTime.Now;
+        if (disposed)
+        {
+            return;
+        }
 
-        if (keepChanged && hideUnchanged)
+        lastChanged[e.LVar.Name] = DateTime.UtcNow;
+
+        // Not gated on hideUnchanged: that is a display filter. Gating collection on it would
+        // silently drop history whenever the user unticks "Hide unchanged" to browse.
+        if (keepChanged)
         {
             keepChangedSet.TryAdd(e.LVar.Name, 0);
         }
@@ -238,22 +318,40 @@ else
 
     private void BlacklistVisibleLVars()
     {
-        var visibleLVars = getListFiltered().Select(lvar => lvar.Name);
-        foreach (var lvarName in visibleLVars)
+        Blacklist(getListFiltered().Select(lvar => lvar.Name).ToList());
+    }
+
+    private void BlacklistLVar(string name)
+    {
+        Blacklist(new[] { name });
+    }
+
+    private void Blacklist(IReadOnlyCollection<string> names)
+    {
+        // The locked list is built once and bypasses the blacklist filter, so drop the names
+        // there too, otherwise blacklisting looks like a no-op while "Lock list" is on.
+        foreach (var name in names)
         {
-            blacklist.Add(lvarName);
+            lockedNames.Remove(name);
         }
-        BlacklistStore.Save(blacklist);
+
+        // Add() merges with what is on disk and returns the merged set, so a second open tab
+        // holding an older copy cannot clobber these entries.
+        blacklist = BlacklistStore.Add(names);
     }
 
     private void ClearBlacklist()
     {
-        blacklist.Clear();
-        BlacklistStore.Save(blacklist);
+        blacklist = BlacklistStore.Clear();
     }
 
     private void OnValuesChanged(object? sender, EventArgs e)
     {
+        if (disposed)
+        {
+            return;
+        }
+
         SubscribeNewLVars();
 
         if (!autoRefresh)
@@ -269,15 +367,20 @@ else
 
     public void Dispose()
     {
+        // Set first: the heartbeat callback and the FSUIPC handlers check it, so anything already
+        // in flight bails out instead of re-attaching to this dead component.
+        disposed = true;
+
         uiHeartbeat?.Dispose();
 
         MSFSVariableServices.OnValuesChanged -= OnValuesChanged;
 
         foreach (var name in subscribedLVars.Keys.ToList())
         {
-            if (MSFSVariableServices.LVars.Names.Contains(name))
+            var lvar = TryGetLVar(name);
+            if (lvar is not null)
             {
-                MSFSVariableServices.LVars[name].OnValueChanged -= SingleLvarChanged;
+                lvar.OnValueChanged -= SingleLvarChanged;
             }
         }
 

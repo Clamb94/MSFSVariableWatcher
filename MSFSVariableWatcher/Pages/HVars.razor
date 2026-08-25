@@ -1,0 +1,104 @@
+@page "/hvars"
+@using FSUIPC;
+@implements IDisposable
+
+<PageTitle>HVARs - MSFSVariableWatcher</PageTitle>
+
+<h3>HVARs</h3>
+
+@if (MSFSVariableServices.IsRunning)
+{
+    <div class="alert alert-info py-2">
+        <strong>@MSFSVariableServices.HVars.Count</strong> HVARs &middot; last update @DateTime.Now.ToString("HH:mm:ss")
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-body">
+            <div class="controls-panel">
+                <div>
+                    <label class="form-label mb-0" for="txtSearch">Search</label>
+                    <input class="form-control form-control-sm" id="txtSearch" @bind="search" @bind:event="oninput" />
+                </div>
+            </div>
+
+            <div class="mt-3 text-muted small">
+                HVARs have no readable value &mdash; they are write-only triggers, so the only action is Set.
+                @if (!string.IsNullOrEmpty(lastSet))
+                {
+                    <span>Last set: <code>@lastSet</code></span>
+                }
+            </div>
+        </div>
+    </div>
+
+    <table class="table table-sm table-hover lvar-table">
+        <thead>
+            <tr>
+                <th class="col-name">Name</th>
+                <th class="col-set">Set</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var name in Filtered())
+            {
+                <tr>
+                    <td class="col-name">@name</td>
+                    <td class="col-set">
+                        <button class="btn btn-primary btn-sm" @onclick="() => SetHVar(name)">Set</button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+else
+{
+    <div class="alert alert-danger">
+        <strong>Not connected to MSFS.</strong><br />
+        Waiting for connection &mdash; this reconnects automatically once MSFS (with FSUIPC / WASM) is running.
+    </div>
+}
+
+@code {
+    private string search = "";
+    private string? lastSet;
+
+    private Timer? uiHeartbeat;
+
+    protected override void OnInitialized()
+    {
+        // HVars have no value-changed event, so the list is simply re-read every 2s. This
+        // also keeps the connection banner live.
+        uiHeartbeat = new Timer(_ => InvokeAsync(StateHasChanged), null,
+                                TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
+    }
+
+    private List<string> Filtered()
+        => MSFSVariableServices.HVars.Names
+            .Where(n => string.IsNullOrEmpty(search) || n.Contains(search, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+    private void SetHVar(string name)
+    {
+        // The HVar may have vanished (e.g. mid-reconnect) between render and click.
+        if (!MSFSVariableServices.HVars.Exists(name))
+        {
+            return;
+        }
+
+        try
+        {
+            MSFSVariableServices.HVars[name].Set();
+            lastSet = name;
+        }
+        catch (Exception ex)
+        {
+            lastSet = $"{name} failed: {ex.Message}";
+        }
+    }
+
+    public void Dispose()
+    {
+        uiHeartbeat?.Dispose();
+    }
+}
